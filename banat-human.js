@@ -59,7 +59,7 @@ function sendBanatReplyWithTyping(api, message, threadID, replyToMessageID = nul
 
   const prepared = prepareBanatReply(threadID, message, dependencies.incomingText || "");
   const delay = resolveReplyDelayMs(dependencies.replyDelayMs, prepared.reactionMs);
-  console.log(`[BANAT] reply scheduled in ${delay}ms for ${String(threadID)}; configured=${dependencies.replyDelayMs == null ? "human-default" : "dashboard"}`);
+  console.log(`[CELESTIAL] reply scheduled in ${delay}ms for ${String(threadID)}; configured=${dependencies.replyDelayMs == null ? "human-default" : "dashboard"}`);
 
   return new Promise(resolve => {
     setTimeout(() => {
@@ -69,7 +69,7 @@ function sendBanatReplyWithTyping(api, message, threadID, replyToMessageID = nul
         const finish = ok => { if (done) return; done = true; if (dependencies.typingEnabled !== false) stopTyping(api, threadID); resolve(ok); };
         try {
           send(api, prepared.text, threadID, (err, info) => {
-            if (err) { console.error("[BANAT] send failed:", err?.message || err); finish(false); return; }
+            if (err) { console.error("[CELESTIAL] send failed:", err?.message || err); finish(false); return; }
             const id = extractMessageID(info);
             const reactionSettings = getReactionSettings();
             if (!id) {
@@ -88,7 +88,7 @@ function sendBanatReplyWithTyping(api, message, threadID, replyToMessageID = nul
             }
             finish(true);
           }, replyToMessageID || null);
-        } catch (e) { console.error("[BANAT] reply error:", e); finish(false); }
+        } catch (e) { console.error("[CELESTIAL] reply error:", e); finish(false); }
       }, prepared.typingMs);
     }, delay);
   });
