@@ -9,7 +9,6 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
   const allowedOrigins = origin.split(",").map(value => value.trim()).filter(Boolean);
   const events = [];
   const dashboardPath = path.join(__dirname, "dashboard.html");
-  const licenseGuard = controls.licenseGuard || null;
 
   const send = (res, status, body) => {
     res.writeHead(status, {
@@ -25,18 +24,18 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     if (events.length > 80) events.length = 80;
   };
 
-  const readBuffer = (req, maxBytes) => new Promise((resolve,reject)=>{
-    const chunks=[]; let size=0, settled=false;
-    req.on("data",chunk=>{ if(settled)return; size+=chunk.length; if(size>maxBytes){settled=true;reject(new Error("Request body too large"));req.destroy();return;} chunks.push(chunk); });
-    req.on("end",()=>{if(!settled){settled=true;resolve(Buffer.concat(chunks));}});
-    req.on("error",error=>{if(!settled){settled=true;reject(error);}});
+  const readBuffer = (req, maxBytes) => new Promise((resolve, reject) => {
+    const chunks = []; let size = 0, settled = false;
+    req.on("data", chunk => { if (settled) return; size += chunk.length; if (size > maxBytes) { settled = true; reject(new Error("Request body too large")); req.destroy(); return; } chunks.push(chunk); });
+    req.on("end", () => { if (!settled) { settled = true; resolve(Buffer.concat(chunks)); } });
+    req.on("error", error => { if (!settled) { settled = true; reject(error); } });
   });
 
-  const readJson = (req, maxBytes = 150 * 1024) => new Promise((resolve,reject)=>{
-    let raw="";
-    req.on("data",chunk=>{raw+=chunk;if(Buffer.byteLength(raw,"utf8")>maxBytes){reject(new Error("Request body too large"));req.destroy();}});
-    req.on("end",()=>{if(!raw.trim())return resolve({});try{resolve(JSON.parse(raw));}catch(_){reject(new Error("Invalid JSON body"));}});
-    req.on("error",reject);
+  const readJson = (req, maxBytes = 150 * 1024) => new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", chunk => { raw += chunk; if (Buffer.byteLength(raw, "utf8") > maxBytes) { reject(new Error("Request body too large")); req.destroy(); } });
+    req.on("end", () => { if (!raw.trim()) return resolve({}); try { resolve(JSON.parse(raw)); } catch (_) { reject(new Error("Invalid JSON body")); } });
+    req.on("error", reject);
   });
 
   const runtime = () => ({
@@ -80,68 +79,15 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     }
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return send(res, 200, { ok: true, service: "banat-test-bot", dashboard_api: true });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/license/verify") {
-      const requestId = String(req.headers["x-eclipse-request-id"] || ("license-" + Date.now())).slice(0, 100);
-      const startedAt = Date.now();
-      console.info("[ECLIPSE LICENSE API] Verification request received", {
-        request_id: requestId,
-        method: req.method,
-        path: url.pathname
-      });
-      if (!licenseGuard || typeof licenseGuard.verifyIncomingInstallation !== "function") {
-        console.warn("[ECLIPSE LICENSE API] Authority is not configured", { request_id: requestId });
-        return send(res, 503, { ok: false, status: "unavailable", error: "License authority is not configured.", request_id: requestId });
-      }
-      let body;
-      try {
-        body = await readJson(req);
-      } catch (error) {
-        console.warn("[ECLIPSE LICENSE API] Invalid verification request body", {
-          request_id: requestId,
-          error: String(error && error.message || error).slice(0, 200)
-        });
-        return send(res, 400, { ok: false, status: "invalid", error: "Invalid license verification request.", request_id: requestId });
-      }
-      try {
-        const result = await licenseGuard.verifyIncomingInstallation(body);
-        const statusCode = result.status === "approved" ? 200 : 403;
-        console.info("[ECLIPSE LICENSE API] Verification completed", {
-          request_id: requestId,
-          result: result.status || "unknown",
-          http_status: statusCode,
-          elapsed_ms: Date.now() - startedAt
-        });
-        return send(res, statusCode, { ...result, request_id: requestId });
-      } catch (error) {
-        console.error("[ECLIPSE LICENSE API] Verification failed", {
-          request_id: requestId,
-          elapsed_ms: Date.now() - startedAt,
-          error: String(error && error.stack || error).slice(0, 1200)
-        });
-        return send(res, 503, {
-          ok: false,
-          status: "unavailable",
-          error: "The license authority could not complete verification.",
-          request_id: requestId
-        });
-      }
+      return send(res, 200, { ok: true, service: "celestial-bot", dashboard_api: true });
     }
 
     if (!url.pathname.startsWith("/api/dashboard/")) {
       return send(res, 404, { ok: false, error: "Not found" });
     }
 
-    const securityRoute = url.pathname.startsWith("/api/dashboard/security/");
-    const raidRoute = url.pathname.startsWith("/api/dashboard/raid/");
-    if ((securityRoute || raidRoute) && (!licenseGuard || !licenseGuard.dashboardAuthorized(req))) {
-      return send(res, 401, { ok: false, error: "Valid X-ECLIPSE-DASHBOARD-KEY required for this management action." });
-    }
-
     if (!originAllowed) {
-      console.warn("[BANAT] dashboard origin rejected", {
+      console.warn("[CELESTIAL] dashboard origin rejected", {
         requestOrigin,
         configuredOrigin: origin,
         requestHostOrigin
@@ -149,19 +95,9 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       return send(res, 403, { ok: false, error: "Dashboard origin not allowed" });
     }
 
-    const publicDashboardRead = req.method === "GET" && [
-      "/api/dashboard/status", "/api/dashboard/health", "/api/dashboard/events"
-    ].includes(url.pathname);
-    const ownerManagedRoute = url.pathname.startsWith("/api/dashboard/") &&
-      !publicDashboardRead && !url.pathname.startsWith("/api/dashboard/security/") &&
-      !url.pathname.startsWith("/api/dashboard/raid/");
-    if (ownerManagedRoute && (!licenseGuard || !licenseGuard.dashboardAuthorized(req))) {
-      return send(res, 401, { ok: false, error: "Valid X-ECLIPSE-DASHBOARD-KEY required for dashboard management." });
-    }
-
+    // Raid Mode routes — no license check
     if (url.pathname.startsWith("/api/dashboard/raid/")) {
       const raid = controls.raidMode;
-      if (typeof controls.isLicensed === "function" && !controls.isLicensed()) return send(res, 403, { ok: false, error: "This installation is not authorized to manage Raid Mode." });
       if (!raid) return send(res, 503, { ok: false, error: "Raid Mode is not initialized." });
       try {
         if (req.method === "GET" && url.pathname === "/api/dashboard/raid/status") {
@@ -204,96 +140,47 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       }
     }
 
-    if (req.method === "GET" && url.pathname === "/api/dashboard/security/status") {
-      return send(res, 200, { ok: true, license: licenseGuard ? licenseGuard.getStatus() : null, mode: licenseGuard ? (licenseGuard.getStatus().mode) : "unavailable" });
-    }
-    if (req.method === "GET" && url.pathname === "/api/dashboard/security/license-settings") {
-      try { return send(res, 200, { ok: true, settings: await licenseGuard.getLicenseSettings() }); }
-      catch (error) { return send(res, 503, { ok: false, error: error.message || "License settings unavailable." }); }
-    }
-    if (req.method === "POST" && url.pathname === "/api/dashboard/security/license-settings") {
-      try {
-        const body = await readJson(req);
-        const settings = await licenseGuard.updateLicenseSettings(body);
-        return send(res, 200, { ok: true, settings });
-      } catch (error) {
-        return send(res, 400, { ok: false, error: error.message || "Could not update license settings." });
-      }
-    }
-    if (req.method === "GET" && url.pathname === "/api/dashboard/security/license-override") {
-      try { return send(res, 200, { ok: true, override: await licenseGuard.getTemporaryOverride() }); }
-      catch (error) { return send(res, 503, { ok: false, error: error.message || "Override status unavailable." }); }
-    }
-    if (req.method === "POST" && url.pathname === "/api/dashboard/security/license-override") {
-      try {
-        const body = await readJson(req);
-        if (typeof body.enabled !== "boolean") return send(res, 400, { ok: false, error: "enabled must be true or false." });
-        const override = await licenseGuard.setTemporaryOverride(body);
-        return send(res, 200, { ok: true, override });
-      } catch (error) {
-        return send(res, 400, { ok: false, error: error.message || "Could not change temporary license override." });
-      }
-    }
-    if (req.method === "GET" && url.pathname === "/api/dashboard/security/installations") {
-      try { return send(res, 200, { ok: true, installations: await licenseGuard.listInstallations() }); }
-      catch (error) { return send(res, 503, { ok: false, error: error.message || "Installation registry unavailable." }); }
-    }
-    if (req.method === "GET" && url.pathname === "/api/dashboard/security/forks") {
-      try { return send(res, 200, { ok: true, forks: await licenseGuard.listForks() }); }
-      catch (error) { return send(res, 502, { ok: false, error: error.message || "GitHub fork lookup failed." }); }
-    }
-    if (req.method === "GET" && url.pathname === "/api/dashboard/security/events") {
-      try { return send(res, 200, { ok: true, events: await licenseGuard.listEvents() }); }
-      catch (error) { return send(res, 503, { ok: false, error: error.message || "Security event history unavailable." }); }
-    }
-    const installationAction = url.pathname.match(new RegExp("^/api/dashboard/security/installations/([a-f0-9-]{32,64})/(approve|revoke)$", "i"));
-    if (req.method === "POST" && installationAction) {
-      try {
-        const installation = await licenseGuard.updateInstallation(installationAction[1], installationAction[2] === "approve" ? "approved" : "revoked");
-        return send(res, 200, { ok: true, installation });
-      } catch (error) {
-        return send(res, 400, { ok: false, error: error.message || "Could not update installation authorization." });
-      }
-    }
-
+    // Proxy
     if (req.method === "GET" && url.pathname === "/api/dashboard/proxy") {
-      const manager=controls.proxyManager;
-      if(!manager)return send(res,503,{ok:false,error:"Proxy control unavailable"});
-      return send(res,200,{ok:true,proxy:manager.getStatus()});
+      const manager = controls.proxyManager;
+      if (!manager) return send(res, 503, { ok: false, error: "Proxy control unavailable" });
+      return send(res, 200, { ok: true, proxy: manager.getStatus() });
     }
     if (req.method === "POST" && url.pathname === "/api/dashboard/proxy") {
-      const manager=controls.proxyManager;
-      if(!manager)return send(res,503,{ok:false,error:"Proxy control unavailable"});
+      const manager = controls.proxyManager;
+      if (!manager) return send(res, 503, { ok: false, error: "Proxy control unavailable" });
       try {
-        const body=await readJson(req);
-        if(typeof body.enabled!=="boolean")return send(res,400,{ok:false,error:"enabled must be true or false"});
+        const body = await readJson(req);
+        if (typeof body.enabled !== "boolean") return send(res, 400, { ok: false, error: "enabled must be true or false" });
         manager.setEnabled(body.enabled);
-        if(body.enabled) { await manager.initialize(); if(typeof controls.onProxyEnabled==="function") controls.onProxyEnabled(); }
-        record("proxy-mode-updated",{enabled:body.enabled});
-        return send(res,200,{ok:true,proxy:manager.getStatus(),connection_change:"next_login"});
-      } catch(error) { return send(res,400,{ok:false,error:error.message||"Could not update proxy mode"}); }
+        if (body.enabled) { await manager.initialize(); if (typeof controls.onProxyEnabled === "function") controls.onProxyEnabled(); }
+        record("proxy-mode-updated", { enabled: body.enabled });
+        return send(res, 200, { ok: true, proxy: manager.getStatus(), connection_change: "next_login" });
+      } catch (error) { return send(res, 400, { ok: false, error: error.message || "Could not update proxy mode" }); }
     }
 
+    // Session
     if (req.method === "GET" && url.pathname === "/api/dashboard/session") {
-      if (typeof controls.getSessionStatus !== "function") return send(res,501,{ok:false,error:"Session storage unavailable"});
-      try { return send(res,200,{ok:true,session:controls.getSessionStatus()}); }
-      catch(error) { return send(res,503,{ok:false,error:error.message||"Session status unavailable"}); }
+      if (typeof controls.getSessionStatus !== "function") return send(res, 501, { ok: false, error: "Session storage unavailable" });
+      try { return send(res, 200, { ok: true, session: controls.getSessionStatus() }); }
+      catch (error) { return send(res, 503, { ok: false, error: error.message || "Session status unavailable" }); }
     }
     if (req.method === "POST" && url.pathname === "/api/dashboard/session") {
-      if (typeof controls.saveSession !== "function") return send(res,501,{ok:false,error:"Session storage unavailable"});
+      if (typeof controls.saveSession !== "function") return send(res, 501, { ok: false, error: "Session storage unavailable" });
       try {
-        const body=await readJson(req);
+        const body = await readJson(req);
         controls.saveSession(body.cookie);
-        record("session-validation-started",{storage:"memory"});
-        return send(res,200,{ok:true,saved:true,validating:true,encrypted:false,restart_required:false,message:"Session accepted for validation. The existing connection is preserved unless the replacement successfully authenticates. Session memory is cleared on restart or spin-down."});
-      } catch(error) { return send(res,400,{ok:false,error:error.message||"Could not save session"}); }
+        record("session-validation-started", { storage: "memory" });
+        return send(res, 200, { ok: true, saved: true, validating: true, encrypted: false, restart_required: false, message: "Session accepted for validation. The existing connection is preserved unless the replacement successfully authenticates. Session memory is cleared on restart or spin-down." });
+      } catch (error) { return send(res, 400, { ok: false, error: error.message || "Could not save session" }); }
     }
     if (req.method === "DELETE" && url.pathname === "/api/dashboard/session") {
-      if (typeof controls.clearSession !== "function") return send(res,501,{ok:false,error:"Session storage unavailable"});
-      try { controls.clearSession(); record("session-cleared"); return send(res,200,{ok:true,cleared:true,restart_required:true}); }
-      catch(error) { return send(res,500,{ok:false,error:"Could not clear saved session"}); }
+      if (typeof controls.clearSession !== "function") return send(res, 501, { ok: false, error: "Session storage unavailable" });
+      try { controls.clearSession(); record("session-cleared"); return send(res, 200, { ok: true, cleared: true, restart_required: true }); }
+      catch (error) { return send(res, 500, { ok: false, error: "Could not clear saved session" }); }
     }
 
+    // Status/health/events
     if (req.method === "GET" && url.pathname === "/api/dashboard/status") {
       const status = typeof getStatus === "function" ? getStatus() : {};
       return send(res, 200, {
@@ -302,23 +189,23 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
         bot_paused: typeof controls.getPaused === "function" ? Boolean(controls.getPaused()) : false
       });
     }
-
     if (req.method === "GET" && url.pathname === "/api/dashboard/health") {
       return send(res, 200, { ok: true, runtime: runtime() });
     }
-
     if (req.method === "GET" && url.pathname === "/api/dashboard/events") {
       return send(res, 200, { ok: true, events: events.slice(0, 80) });
     }
 
+    // Groups
     if (req.method === "GET" && url.pathname === "/api/dashboard/groups") {
-      if (typeof controls.getGroups !== "function") return send(res, 501, { ok:false, error:"Messenger group list is unavailable" });
-      try { return send(res,200,{ok:true,groups:await controls.getGroups()}); }
-      catch(error){ record("group-list-failed",{error:String(error?.message||error).slice(0,250)}); return send(res,502,{ok:false,error:error?.message||"Could not load Messenger groups"}); }
+      if (typeof controls.getGroups !== "function") return send(res, 501, { ok: false, error: "Messenger group list is unavailable" });
+      try { return send(res, 200, { ok: true, groups: await controls.getGroups() }); }
+      catch (error) { record("group-list-failed", { error: String(error?.message || error).slice(0, 250) }); return send(res, 502, { ok: false, error: error?.message || "Could not load Messenger groups" }); }
     }
+
+    // Mass SetNN — no license check
     if (req.method === "POST" && url.pathname === "/api/dashboard/setnn/mass") {
       if (typeof controls.massSetNickname !== "function") return send(res, 503, { ok: false, error: "Mass SetNN is unavailable." });
-      if (typeof controls.isLicensed === "function" && !controls.isLicensed()) return send(res, 403, { ok: false, error: "This installation is not authorized." });
       try {
         const body = await readJson(req);
         const result = await controls.massSetNickname(body.threadID, body.userIDs, body.nickname);
@@ -328,10 +215,10 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       }
     }
 
+    // Countdown — no license check
     const countdown = controls.countdown;
     if (url.pathname.startsWith("/api/dashboard/countdown/")) {
       if (!countdown) return send(res, 503, { ok: false, error: "Countdown controls are unavailable." });
-      if (typeof controls.isLicensed === "function" && !controls.isLicensed()) return send(res, 403, { ok: false, error: "This installation is not authorized." });
       try {
         if (req.method === "GET" && url.pathname === "/api/dashboard/countdown/receipt") {
           return send(res, 200, { ok: true, settings: await countdown.getReceiptSettings() });
@@ -363,6 +250,7 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       }
     }
 
+    // Group members
     if (req.method === "GET" && url.pathname === "/api/dashboard/group-members") {
       if (typeof controls.getGroupMembers !== "function") return send(res, 501, { ok: false, error: "Messenger member lookup is unavailable" });
       try {
@@ -374,25 +262,27 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
         return send(res, 502, { ok: false, error: error.message || "Could not load group members." });
       }
     }
+
+    // Settings
     if (req.method === "GET" && url.pathname === "/api/dashboard/settings") {
-      if (typeof controls.getSettings !== "function") return send(res,501,{ok:false,error:"Settings unavailable"});
-      return send(res,200,{ok:true,settings:await controls.getSettings()});
+      if (typeof controls.getSettings !== "function") return send(res, 501, { ok: false, error: "Settings unavailable" });
+      return send(res, 200, { ok: true, settings: await controls.getSettings() });
     }
     if (req.method === "POST" && url.pathname === "/api/dashboard/settings/reaction") {
-      if (typeof controls.updateReaction !== "function") return send(res,501,{ok:false,error:"Reaction settings unavailable"});
-      try { const body=await readJson(req); const reaction=await controls.updateReaction(body); record("reaction-settings-updated",{enabled:reaction.enabled,target:reaction.target,targetMode:reaction.targetMode}); return send(res,200,{ok:true,reaction}); }
-      catch(error){return send(res,400,{ok:false,error:error.message||"Could not save reaction settings"});}
+      if (typeof controls.updateReaction !== "function") return send(res, 501, { ok: false, error: "Reaction settings unavailable" });
+      try { const body = await readJson(req); const reaction = await controls.updateReaction(body); record("reaction-settings-updated", { enabled: reaction.enabled, target: reaction.target, targetMode: reaction.targetMode }); return send(res, 200, { ok: true, reaction }); }
+      catch (error) { return send(res, 400, { ok: false, error: error.message || "Could not save reaction settings" }); }
     }
     if (req.method === "POST" && url.pathname === "/api/dashboard/settings/group") {
-      if (typeof controls.updateGroup !== "function") return send(res,501,{ok:false,error:"Group settings unavailable"});
-      try { const body=await readJson(req); const group=controls.updateGroup(body.threadID,body); record("group-settings-updated",{thread_id:group.threadID,banat_mode:group.banatMode}); return send(res,200,{ok:true,group}); }
-      catch(error){return send(res,400,{ok:false,error:error.message||"Could not save group settings"});}
+      if (typeof controls.updateGroup !== "function") return send(res, 501, { ok: false, error: "Group settings unavailable" });
+      try { const body = await readJson(req); const group = controls.updateGroup(body.threadID, body); record("group-settings-updated", { thread_id: group.threadID, banat_mode: group.banatMode }); return send(res, 200, { ok: true, group }); }
+      catch (error) { return send(res, 400, { ok: false, error: error.message || "Could not save group settings" }); }
     }
 
+    // Spam Mode — no license check
     if (url.pathname.startsWith("/api/dashboard/spam/")) {
       const spam = controls.spamMode;
       if (!spam) return send(res, 503, { ok: false, error: "Spam Mode is unavailable." });
-      if (typeof controls.isLicensed === "function" && !controls.isLicensed()) return send(res, 403, { ok: false, error: "This installation is not authorized." });
       try {
         if (req.method === "GET" && url.pathname === "/api/dashboard/spam/status") {
           return send(res, 200, { ok: true, runs: spam.getStatus() });
@@ -414,13 +304,13 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       }
     }
 
+    // Bot start/stop
     if (req.method === "POST" && url.pathname === "/api/dashboard/bot/start") {
       if (typeof controls.setPaused !== "function") return send(res, 501, { ok: false, error: "Bot start control is unavailable" });
       controls.setPaused(false);
       record("bot-resumed");
       return send(res, 200, { ok: true, bot_paused: false });
     }
-
     if (req.method === "POST" && url.pathname === "/api/dashboard/bot/stop") {
       if (typeof controls.setPaused !== "function") return send(res, 501, { ok: false, error: "Bot pause control is unavailable" });
       controls.setPaused(true);
@@ -439,6 +329,6 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     return send(res, 404, { ok: false, error: "Unsupported dashboard endpoint" });
   });
 
-  server.listen(port, () => console.log("[BANAT] dashboard + API listening on :" + port));
+  server.listen(port, () => console.log("[CELESTIAL] dashboard + API listening on :" + port));
   return server;
 };
